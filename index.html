@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>台股損益筆記</title>
+    
+    <!-- 引入 Tailwind CSS (美觀樣式) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Vue.js 3 (核心邏輯) -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- 引入 Chart.js (圓餅圖) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 引入 FontAwesome (圖示) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- 自定義樣式 -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f8f9fa; /* 極淺灰白 */
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* 隱藏滾動條但保留功能 (App質感) */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* 1. 頁首圓弧設計與漸層 */
+        .app-header {
+            background: linear-gradient(135deg, #18181b 0%, #581c87 100%); /* 黑到淺紫漸層 */
+            border-bottom-left-radius: 40px;
+            border-bottom-right-radius: 40px;
+            padding-bottom: 80px; /* 預留給重疊區塊的空間 */
+            position: relative;
+            z-index: 10;
+        }
+
+        /* 2. 內容向上重疊 */
+        .content-overlap {
+            margin-top: -20px;
+            position: relative;
+            z-index: 20;
+        }
+
+        /* 浮動 Tab 按鈕區 */
+        .floating-tabs {
+            position: absolute;
+            bottom: 20px; /* 浮在 Header 底部 */
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50px;
+            padding: 5px;
+            display: flex;
+            gap: 5px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e9d5ff; /* 淺紫色文字 */
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .tab-btn.active {
+            background-color: #ffffff;
+            color: #581c87; /* 深紫色 */
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transform: translateY(-2px);
+        }
+
+        /* 表單元素美化 */
+        .input-group {
+            background-color: #f3f4f6;
+            border-radius: 12px;
+            padding: 10px 15px;
+            transition: ring 0.2s;
+        }
+        .input-group:focus-within {
+            ring: 2px;
+            box-shadow: 0 0 0 2px #d8b4fe; /* 淺紫光圈 */
+        }
+        
+        /* 損益顏色 (台股：紅漲綠跌) */
+        .text-up { color: #ef4444; }
+        .text-down { color: #22c55e; }
+        .bg-up { background-color: #ef4444; }
+        .bg-down { background-color: #22c55e; }
+
+        /* 動畫 */
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity 0.3s ease;
+        }
+        .fade-enter-from, .fade-leave-to {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body class="text-gray-800 h-screen flex flex-col overflow-hidden">
+
+<div id="app" class="h-full flex flex-col w-full max-w-md mx-auto bg-gray-50 shadow-2xl relative overflow-hidden">
+    
+    <!-- 頁首區塊 -->
+    <header class="app-header pt-12 px-6">
+        <div class="flex justify-between items-start">
+            <div>
+                <h1 class="text-2xl font-bold text-white tracking-wide">已實現損益</h1>
+                <p class="text-purple-200 text-sm mt-1">台股投資筆記</p>
+            </div>
+            <!-- 裝飾ICON -->
+            <div class="text-purple-400 opacity-20 text-5xl">
+                <i class="fa-solid fa-chart-line"></i>
+            </div>
+        </div>
+
+        <!-- 浮動分頁選單 (Tab Buttons) -->
+        <div class="floating-tabs">
+            <div class="tab-btn" :class="{active: currentTab === 'record'}" @click="switchTab('record')" title="損益紀錄">
+                <i class="fa-solid fa-pen"></i>
+            </div>
+            <div class="tab-btn" :class="{active: currentTab === 'summary'}" @click="switchTab('summary')" title="損益總表">
+                <i class="fa-solid fa-chart-pie"></i>
+            </div>
+            <div class="tab-btn" :class="{active: currentTab === 'market'}" @click="switchTab('market')" title="股市現況">
+                <i class="fa-solid fa-bolt"></i>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主內容區塊 (向上重疊) -->
+    <main class="content-overlap flex-1 px-4 pb-20 overflow-y-auto no-scrollbar">
+        
+        <!-- Tab 1: 損益紀錄表 -->
+        <div v-show="currentTab === 'record'" class="space-y-4">
+            <div class="bg-white rounded-3xl p-6 shadow-lg">
+                <!-- 動態標題：根據是否在編輯模式顯示不同文字 -->
+                <div class="flex justify-between items-center mb-4 border-l-4 border-purple-500 pl-3">
+                    <h2 class="text-lg font-bold text-gray-700">
+                        {{ editingId ? '編輯交易' : '新增交易' }}
+                    </h2>
+                    <!-- 如果是編輯模式，顯示取消按鈕 -->
+                    <button v-if="editingId" @click="cancelEdit" class="text-xs text-gray-400 hover:text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                        <i class="fa-solid fa-xmark mr-1"></i>取消
+                    </button>
+                </div>
+                
+                <div class="space-y-4">
+                    <!-- 日期 -->
+                    <div>
+                        <label class="text-xs text-gray-500 ml-1">交易日期</label>
+                        <div class="input-group">
+                            <input type="date" v-model="form.date" class="w-full bg-transparent outline-none">
+                        </div>
+                    </div>
+
+                    <!-- 股票代號與名稱 -->
+                    <div class="flex gap-3">
+                        <div class="flex-1">
+                            <label class="text-xs text-gray-500 ml-1">代號</label>
+                            <div class="input-group">
+                                <input type="text" v-model="form.code" @input="lookupStock" placeholder="2330" class="w-full bg-transparent outline-none font-bold">
+                            </div>
+                        </div>
+                        <div class="flex-[1.5]">
+                            <label class="text-xs text-gray-500 ml-1">名稱 (自動帶入)</label>
+                            <div class="input-group bg-gray-100">
+                                <input type="text" v-model="form.name" placeholder="台積電" class="w-full bg-transparent outline-none text-gray-600">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 股數 -->
+                    <div>
+                        <label class="text-xs text-gray-500 ml-1">股數</label>
+                        <div class="input-group flex items-center">
+                            <input type="number" v-model.number="form.shares" @input="calculate" placeholder="1000" class="w-full bg-transparent outline-none">
+                            <span class="text-xs text-gray-400">股</span>
+                        </div>
+                    </div>
+
+                    <!-- 買入與賣出價 -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs text-gray-500 ml-1">買入單價</label>
+                            <div class="input-group">
+                                <input type="number" step="0.01" v-model.number="form.buyPrice" @input="calculate" placeholder="0.00" class="w-full bg-transparent outline-none">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-500 ml-1">賣出單價</label>
+                            <div class="input-group">
+                                <input type="number" step="0.01" v-model.number="form.sellPrice" @input="calculate" placeholder="0.00" class="w-full bg-transparent outline-none">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 試算結果與按鈕 -->
+                    <div class="bg-purple-50 rounded-2xl p-4 mt-2">
+                        <div class="flex justify-between text-xs text-gray-500 mb-2">
+                            <span>手續費+稅 (預估): {{ formatCurrency(estimatedCost) }}</span>
+                        </div>
+                        <div class="flex items-center justify-between mb-4">
+                            <label class="font-bold text-gray-700">最終損益</label>
+                            <!-- 損/益 視覺按鈕 (純展示狀態) -->
+                            <div class="flex gap-1">
+                                <span class="px-2 py-1 rounded text-xs font-bold" :class="form.profit < 0 ? 'bg-down text-white' : 'bg-gray-200 text-gray-400'">損 (-)</span>
+                                <span class="px-2 py-1 rounded text-xs font-bold" :class="form.profit >= 0 ? 'bg-up text-white' : 'bg-gray-200 text-gray-400'">益 (+)</span>
+                            </div>
+                        </div>
+                        <!-- 金額輸入欄位 (預設顯示試算，可手動改) -->
+                        <div class="input-group bg-white border border-purple-100">
+                            <input type="number" v-model.number="form.profit" class="w-full bg-transparent outline-none text-right text-xl font-bold" :class="form.profit >= 0 ? 'text-up' : 'text-down'">
+                        </div>
+                    </div>
+
+                    <!-- 存入/更新 按鈕 -->
+                    <button @click="saveRecord" class="w-full py-4 rounded-xl font-bold shadow-lg active:scale-95 transition-transform flex justify-center items-center gap-2"
+                        :class="editingId ? 'bg-purple-600 text-white' : 'bg-black text-white'">
+                        <i class="fa-solid" :class="editingId ? 'fa-rotate' : 'fa-floppy-disk'"></i> 
+                        {{ editingId ? '更新紀錄' : '存入紀錄' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: 損益總表 -->
+        <div v-show="currentTab === 'summary'" class="space-y-4">
+            
+            <!-- 篩選器 -->
+            <div class="flex justify-end gap-2 px-2">
+                <select v-model="filterYear" @change="updateChart" class="bg-white px-3 py-1 rounded-full text-sm shadow-sm outline-none border border-gray-100">
+                    <option v-for="y in yearsList" :value="y">{{ y }}年</option>
+                </select>
+                <select v-model="filterMonth" @change="updateChart" class="bg-white px-3 py-1 rounded-full text-sm shadow-sm outline-none border border-gray-100">
+                    <option v-for="m in 12" :value="m">{{ m }}月</option>
+                </select>
+            </div>
+
+            <!-- 圓餅圖區塊 -->
+            <div class="bg-white rounded-3xl p-6 shadow-lg flex flex-col items-center relative">
+                <h3 class="text-gray-500 text-sm font-medium w-full text-left mb-2">月度損益分析</h3>
+                
+                <div class="relative w-48 h-48">
+                    <canvas id="profitChart"></canvas>
+                    <!-- 中間顯示總損益 -->
+                    <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span class="text-xs text-gray-400">淨利</span>
+                        <span class="text-lg font-bold" :class="monthlyNet >= 0 ? 'text-up' : 'text-down'">{{ formatCurrency(monthlyNet) }}</span>
+                    </div>
+                </div>
+
+                <div class="flex w-full justify-between mt-6 px-4">
+                    <div class="text-center">
+                        <div class="text-xs text-gray-400">總獲利</div>
+                        <div class="text-up font-bold text-lg">{{ formatCurrency(monthlyGain) }}</div>
+                    </div>
+                    <div class="h-8 w-px bg-gray-200"></div>
+                    <div class="text-center">
+                        <div class="text-xs text-gray-400">總虧損</div>
+                        <div class="text-down font-bold text-lg">{{ formatCurrency(monthlyLoss) }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 明細列表 -->
+            <div class="bg-white rounded-3xl p-6 shadow-lg min-h-[200px]">
+                <h3 class="text-gray-700 font-bold mb-4 border-l-4 border-purple-500 pl-3">本月明細</h3>
+                <div v-if="filteredRecords.length === 0" class="text-center text-gray-400 py-4 text-sm">
+                    此月份尚無紀錄
+                </div>
+                <div v-else class="space-y-3">
+                    <div v-for="(rec, idx) in filteredRecords" :key="idx" class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+                        <!-- 左側資訊 -->
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white" :class="rec.profit >= 0 ? 'bg-up' : 'bg-down'">
+                                {{ rec.profit >= 0 ? '益' : '損' }}
+                            </div>
+                            <div class="min-w-0">
+                                <div class="font-bold text-gray-800 text-sm truncate">{{ rec.name }} <span class="text-xs text-gray-400 font-normal">{{ rec.code }}</span></div>
+                                <div class="text-xs text-gray-400">{{ rec.date }}</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 右側操作與金額 -->
+                        <div class="flex items-center gap-3 pl-2 flex-shrink-0">
+                            <div class="text-right">
+                                <div class="font-bold text-sm" :class="rec.profit >= 0 ? 'text-up' : 'text-down'">
+                                    {{ rec.profit > 0 ? '+' : '' }}{{ formatCurrency(rec.profit) }}
+                                </div>
+                            </div>
+                            <!-- 操作按鈕群 -->
+                            <div class="flex gap-2">
+                                <button @click="editRecord(rec.id)" class="w-7 h-7 flex items-center justify-center rounded-full bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors">
+                                    <i class="fa-solid fa-pen text-xs"></i>
+                                </button>
+                                <button @click="deleteRecord(rec.id)" class="w-7 h-7 flex items-center justify-center rounded-full bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+                                    <i class="fa-solid fa-trash text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: 股市現況 -->
+        <div v-show="currentTab === 'market'" class="space-y-4">
+            <div class="bg-white rounded-3xl p-6 shadow-lg min-h-[400px]">
+                <h2 class="text-lg font-bold text-gray-700 mb-6 border-l-4 border-purple-500 pl-3">即時行情查詢</h2>
+
+                <div class="mb-6">
+                    <label class="text-xs text-gray-500 ml-1 mb-1 block">輸入股票代號</label>
+                    <div class="input-group flex items-center gap-2">
+                        <i class="fa-solid fa-magnifying-glass text-gray-400"></i>
+                        <input type="text" v-model="marketCode" @input="lookupMarketStock" placeholder="例如: 0050" class="w-full bg-transparent outline-none">
+                    </div>
+                </div>
+
+                <div v-if="marketName" class="text-center mb-8 bg-gray-50 py-4 rounded-xl">
+                    <div class="text-gray-400 text-xs">搜尋結果</div>
+                    <div class="text-2xl font-bold text-purple-700 mt-1">{{ marketName }}</div>
+                    <div class="text-sm text-gray-500">{{ marketCode }}</div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4">
+                    <a :href="yahooLink" target="_blank" class="block w-full" :class="{'opacity-50 pointer-events-none': !marketCode}">
+                        <div class="bg-[#3e0868] text-white p-4 rounded-xl flex items-center justify-between shadow-md hover:shadow-lg transition-shadow">
+                            <span class="font-bold"><i class="fa-brands fa-yahoo mr-2"></i> Yahoo! 股市</span>
+                            <i class="fa-solid fa-chevron-right text-xs"></i>
+                        </div>
+                    </a>
+                    
+                    <a :href="wantgooLink" target="_blank" class="block w-full" :class="{'opacity-50 pointer-events-none': !marketCode}">
+                        <div class="bg-[#2c3e50] text-white p-4 rounded-xl flex items-center justify-between shadow-md hover:shadow-lg transition-shadow">
+                            <span class="font-bold"><i class="fa-solid fa-chart-line mr-2"></i> 玩股網 WantGoo</span>
+                            <i class="fa-solid fa-chevron-right text-xs"></i>
+                        </div>
+                    </a>
+                </div>
+
+                <div class="mt-8 text-xs text-gray-400 leading-relaxed">
+                    * 輸入代碼後，點擊上方按鈕將開啟外部連結查看即時股價。<br>
+                    * 資料來源為外部網站，本 App 僅提供連結跳轉。
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+</div>
+
+<script>
+    const { createApp, reactive, computed, ref, onMounted, watch } = Vue;
+
+    createApp({
+        setup() {
+            // 狀態變數
+            const currentTab = ref('record');
+            const records = ref([]);
+            const chartInstance = ref(null);
+            
+            // 編輯狀態
+            const editingId = ref(null);
+            
+            // 內建簡易股票代碼庫
+            const stockDB = {
+                "2330": "台積電", "2317": "鴻海", "2454": "聯發科", "2308": "台達電",
+                "2303": "聯電", "2881": "富邦金", "2882": "國泰金", "2891": "中信金",
+                "1101": "台泥", "2002": "中鋼", "2603": "長榮", "2609": "陽明",
+                "2615": "萬海", "3008": "大立光", "3231": "緯創", "2382": "廣達",
+                "0050": "元大台灣50", "0056": "元大高股息", "00878": "國泰永續高股息",
+                "00929": "復華台灣科技優息", "00919": "群益台灣精選高息"
+            };
+
+            // 損益表單
+            const form = reactive({
+                date: new Date().toISOString().split('T')[0],
+                code: '',
+                name: '',
+                buyPrice: null,
+                sellPrice: null,
+                shares: null,
+                profit: 0
+            });
+
+            // 預估手續費 (買賣 0.1425%) + 證交稅 (賣 0.3%)
+            const estimatedCost = ref(0);
+
+            // 篩選器
+            const filterYear = ref(new Date().getFullYear());
+            const filterMonth = ref(new Date().getMonth() + 1);
+            
+            // 股市查詢
+            const marketCode = ref('');
+            const marketName = ref('');
+
+            // 計算屬性: 可選年份
+            const yearsList = computed(() => {
+                const current = new Date().getFullYear();
+                return [current, current-1, current-2];
+            });
+
+            // 計算屬性: 篩選後的紀錄
+            const filteredRecords = computed(() => {
+                return records.value.filter(r => {
+                    const d = new Date(r.date);
+                    return d.getFullYear() === filterYear.value && (d.getMonth() + 1) === filterMonth.value;
+                }).sort((a,b) => new Date(b.date) - new Date(a.date)); // 日期新到舊
+            });
+
+            // 計算屬性: 當月統計
+            const monthlyGain = computed(() => filteredRecords.value.filter(r => r.profit > 0).reduce((sum, r) => sum + r.profit, 0));
+            const monthlyLoss = computed(() => filteredRecords.value.filter(r => r.profit < 0).reduce((sum, r) => sum + r.profit, 0));
+            const monthlyNet = computed(() => monthlyGain.value + monthlyLoss.value); // loss is negative
+
+            // 計算屬性: 連結
+            const yahooLink = computed(() => `https://tw.stock.yahoo.com/quote/${marketCode.value}`);
+            const wantgooLink = computed(() => `https://www.wantgoo.com/stock/${marketCode.value}`);
+
+            // 方法: 查詢股票名稱 (表單用)
+            const lookupStock = () => {
+                if(stockDB[form.code]) {
+                    form.name = stockDB[form.code];
+                } else {
+                    // 若不在清單，允許使用者自行輸入
+                }
+            };
+
+            // 方法: 查詢股票名稱 (股市現況用)
+            const lookupMarketStock = () => {
+                if(stockDB[marketCode.value]) {
+                    marketName.value = stockDB[marketCode.value];
+                } else {
+                    marketName.value = marketCode.value.length >= 4 ? '自訂/未知股票' : '';
+                }
+            };
+
+            // 方法: 計算損益
+            const calculate = () => {
+                if(form.buyPrice && form.sellPrice && form.shares) {
+                    const buyTotal = form.buyPrice * form.shares;
+                    const sellTotal = form.sellPrice * form.shares;
+                    
+                    // 手續費率 0.1425%, 證交稅 0.3%
+                    const feeBuy = Math.floor(buyTotal * 0.001425);
+                    const feeSell = Math.floor(sellTotal * 0.001425);
+                    const tax = Math.floor(sellTotal * 0.003);
+                    
+                    estimatedCost.value = feeBuy + feeSell + tax;
+                    
+                    // 淨利 = 賣出總額 - 買入總額 - 總成本
+                    form.profit = Math.round(sellTotal - buyTotal - estimatedCost.value);
+                }
+            };
+
+            // 方法: 重置表單
+            const resetForm = (keepDate = true) => {
+                if (!keepDate) {
+                    form.date = new Date().toISOString().split('T')[0];
+                }
+                form.code = '';
+                form.name = '';
+                form.buyPrice = null;
+                form.sellPrice = null;
+                form.shares = null;
+                form.profit = 0;
+                estimatedCost.value = 0;
+                editingId.value = null; // 退出編輯模式
+            };
+
+            // 方法: 載入資料到編輯表單
+            const editRecord = (id) => {
+                const target = records.value.find(r => r.id === id);
+                if (target) {
+                    editingId.value = id;
+                    // 將資料複製到表單
+                    form.date = target.date;
+                    form.code = target.code;
+                    form.name = target.name;
+                    form.buyPrice = target.buyPrice;
+                    form.sellPrice = target.sellPrice;
+                    form.shares = target.shares;
+                    form.profit = target.profit;
+                    
+                    // 重新試算一下預估費用 (非必要，但顯示用)
+                    calculate();
+
+                    // 切換到表單分頁
+                    switchTab('record');
+                }
+            };
+
+            // 方法: 取消編輯
+            const cancelEdit = () => {
+                resetForm(true); // 保留日期，清空其他
+            };
+
+            // 方法: 存入/更新紀錄
+            const saveRecord = () => {
+                if(!form.code || !form.profit && form.profit !== 0) {
+                    alert('請填寫完整資訊');
+                    return;
+                }
+
+                if (editingId.value) {
+                    // 更新模式
+                    const index = records.value.findIndex(r => r.id === editingId.value);
+                    if (index !== -1) {
+                        records.value[index] = {
+                            id: editingId.value, // 保持原ID
+                            ...form
+                        };
+                        alert('已更新紀錄！');
+                    }
+                } else {
+                    // 新增模式
+                    const newRecord = {
+                        id: Date.now(),
+                        ...form
+                    };
+                    records.value.push(newRecord);
+                    alert('已存入！');
+                }
+                
+                // 儲存並重置
+                localStorage.setItem('stock_records', JSON.stringify(records.value));
+                resetForm(true); // 保留日期方便連續輸入
+            };
+
+            // 方法: 刪除紀錄
+            const deleteRecord = (id) => {
+                if(confirm('確定刪除此筆資料？')) {
+                    records.value = records.value.filter(r => r.id !== id);
+                    localStorage.setItem('stock_records', JSON.stringify(records.value));
+                    
+                    // 如果正在編輯這筆被刪除的資料，則退出編輯模式
+                    if (editingId.value === id) {
+                        cancelEdit();
+                    }
+                    
+                    updateChart(); // 更新圖表
+                }
+            };
+
+            // 方法: 格式化金額
+            const formatCurrency = (val) => {
+                if (val === null || val === undefined) return '0';
+                return new Intl.NumberFormat('zh-TW').format(Math.abs(val));
+            };
+
+            // 方法: 切換分頁
+            const switchTab = (tab) => {
+                currentTab.value = tab;
+                if(tab === 'summary') {
+                    setTimeout(renderChart, 100); // 確保 DOM 渲染後畫圖
+                }
+            };
+
+            // 圖表邏輯
+            const renderChart = () => {
+                const ctx = document.getElementById('profitChart');
+                if(!ctx) return;
+                
+                if(chartInstance.value) {
+                    chartInstance.value.destroy();
+                }
+
+                // 資料準備：只顯示總賺 vs 總賠 (取絕對值)
+                // 如果都沒有資料，顯示灰色預設值
+                let data = [monthlyGain.value, Math.abs(monthlyLoss.value)];
+                let bgColors = ['#ef4444', '#22c55e']; // 紅(賺), 綠(賠)
+                
+                if(monthlyGain.value === 0 && monthlyLoss.value === 0) {
+                    data = [1];
+                    bgColors = ['#e5e7eb']; // 灰色
+                }
+
+                chartInstance.value = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['獲利', '虧損'],
+                        datasets: [{
+                            data: data,
+                            backgroundColor: bgColors,
+                            borderWidth: 0,
+                            hoverOffset: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '75%', // 中空大小
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: (monthlyGain.value !== 0 || monthlyLoss.value !== 0) }
+                        }
+                    }
+                });
+            };
+
+            const updateChart = () => {
+                if(currentTab.value === 'summary') {
+                    renderChart();
+                }
+            };
+
+            // 初始化
+            onMounted(() => {
+                const saved = localStorage.getItem('stock_records');
+                if(saved) {
+                    records.value = JSON.parse(saved);
+                }
+            });
+
+            // 監聽篩選變化重繪圖表
+            watch([filterYear, filterMonth], () => {
+                updateChart();
+            });
+
+            return {
+                currentTab, form, records, estimatedCost, 
+                filterYear, filterMonth, yearsList, filteredRecords,
+                monthlyGain, monthlyLoss, monthlyNet,
+                marketCode, marketName, yahooLink, wantgooLink,
+                lookupStock, lookupMarketStock, calculate, saveRecord, deleteRecord,
+                formatCurrency, switchTab, updateChart,
+                editingId, editRecord, cancelEdit // 新增的編輯方法
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
